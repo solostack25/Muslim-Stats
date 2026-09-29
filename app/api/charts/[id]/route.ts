@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getStaff } from "@/lib/supabase/server";
 import { computeData } from "@/lib/charts/compute";
 import type { ChartSpec, Row } from "@/lib/charts/types";
@@ -9,6 +10,15 @@ function slugify(s: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
+}
+
+/** Refresh cached public pages so publish/unpublish/edits show up immediately. */
+function refreshPublic(slug?: string | null) {
+  revalidatePath("/");
+  if (slug) {
+    revalidatePath(`/c/${slug}`);
+    revalidatePath(`/embed/${slug}`);
+  }
 }
 
 const EDITABLE = ["title", "subtitle", "source_note", "chart_type", "spec", "status"] as const;
@@ -50,8 +60,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const { data: withSnap, error: snapErr } = await supabase
       .from("charts").update({ published_data: snapshot }).eq("id", id).select("*").single();
     if (snapErr) return NextResponse.json({ error: snapErr.message }, { status: 500 });
+    refreshPublic(withSnap.slug);
     return NextResponse.json(withSnap);
   }
+  refreshPublic(data.slug);
   return NextResponse.json(data);
 }
 
@@ -59,7 +71,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const { supabase, user, isStaff } = await getStaff();
   if (!user || !isStaff) return NextResponse.json({ error: "You don't have access." }, { status: 403 });
-  const { error } = await supabase.from("charts").delete().eq("id", id);
+  const { data: gone, error } = await supabase.from("charts").delete().eq("id", id).select("slug").maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  refreshPublic(gone?.slug);
   return NextResponse.json({ ok: true });
 }
