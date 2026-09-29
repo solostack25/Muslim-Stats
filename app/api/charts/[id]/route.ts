@@ -21,7 +21,7 @@ function refreshPublic(slug?: string | null) {
   }
 }
 
-const EDITABLE = ["title", "subtitle", "source_note", "chart_type", "spec", "status"] as const;
+const EDITABLE = ["title", "subtitle", "source_note", "chart_type", "spec", "status", "body_md", "takeaways", "source_url"] as const;
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -31,6 +31,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = await req.json();
   const update: Record<string, unknown> = {};
   for (const k of EDITABLE) if (k in body) update[k] = body[k];
+
+  if ("takeaways" in update) {
+    const list = Array.isArray(update.takeaways) ? update.takeaways : [];
+    update.takeaways = list.map((t) => String(t).trim()).filter(Boolean).slice(0, 8).map((t) => t.slice(0, 300));
+  }
+  if ("body_md" in update) {
+    update.body_md = update.body_md ? String(update.body_md).slice(0, 50000) : null;
+  }
+  if ("source_url" in update) {
+    const url = update.source_url ? String(update.source_url).trim() : "";
+    if (url && !/^https?:\/\//i.test(url)) {
+      return NextResponse.json({ error: "The source link must start with http:// or https://" }, { status: 400 });
+    }
+    update.source_url = url || null;
+  }
   if (update.spec && typeof update.spec === "object" && "chart_type" in (update.spec as object)) {
     update.chart_type = (update.spec as { chart_type: string }).chart_type;
   }

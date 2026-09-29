@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Chart from "@/components/Chart";
+import { computeData } from "@/lib/charts/compute";
+import { summarize } from "@/lib/charts/summary";
+import { renderMarkdown } from "@/lib/markdown";
 import { CHART_TYPES, type ChartRecord, type ColumnProfile, type Row } from "@/lib/charts/types";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -141,16 +144,18 @@ export default function Gallery({ datasetId, columns, rows, initial }: {
           {shown.map((c) => {
             const domId = `chart-${c.id}`;
             return (
-              <article key={c.id} className="card">
-                <Chart id={domId} spec={c.spec} rows={rows} title={c.title} subtitle={c.subtitle} sourceNote={c.source_note} />
-
-                {editing === c.id && (
-                  <Editor chart={c} columns={columns} onSave={async (body) => { await update(c.id, body); setEditing(null); }}
+              <article key={c.id} className={`card${editing === c.id ? " editing" : ""}`}>
+                {editing === c.id ? (
+                  <Editor chart={c} columns={columns} rows={rows} domId={domId}
+                    onSave={async (body) => { await update(c.id, body); setEditing(null); }}
                     onCancel={() => setEditing(null)} />
+                ) : (
+                  <Chart id={domId} spec={c.spec} rows={rows} title={c.title} subtitle={c.subtitle} sourceNote={c.source_note} />
                 )}
 
                 <div className="card-actions">
                   <span className={`status ${c.status}`}>{c.status[0].toUpperCase() + c.status.slice(1)}</span>
+                  {(c.body_md || c.takeaways?.length) ? <span className="muted" style={{ fontSize: "0.85rem" }}>Has article</span> : null}
                   {c.status === "draft" && (
                     <>
                       <button className="btn primary" onClick={() => update(c.id, { status: "approved" })}>Approve</button>
@@ -169,7 +174,7 @@ export default function Gallery({ datasetId, columns, rows, initial }: {
                   {c.status === "rejected" && (
                     <button className="btn quiet" onClick={() => update(c.id, { status: "draft" })}>Restore</button>
                   )}
-                  {editing !== c.id && <button className="btn quiet" onClick={() => setEditing(c.id)}>Edit</button>}
+                  {editing !== c.id && <button className="btn quiet" onClick={() => setEditing(c.id)}>Edit chart and article</button>}
                   <button className="btn quiet" onClick={() => downloadPng(domId, slugName(c.title))}>PNG</button>
                   <button className="btn quiet" onClick={() => downloadSvg(domId, slugName(c.title))}>SVG</button>
                   <button className="btn danger" onClick={() => remove(c.id)} aria-label="Delete chart">Delete</button>
@@ -183,71 +188,136 @@ export default function Gallery({ datasetId, columns, rows, initial }: {
   );
 }
 
-function Editor({ chart, columns, onSave, onCancel }: {
-  chart: ChartRecord; columns: ColumnProfile[];
+function Editor({ chart, columns, rows, domId, onSave, onCancel }: {
+  chart: ChartRecord; columns: ColumnProfile[]; rows: Row[]; domId: string;
   onSave: (body: object) => Promise<void>; onCancel: () => void;
 }) {
   const [title, setTitle] = useState(chart.title);
   const [subtitle, setSubtitle] = useState(chart.subtitle ?? "");
   const [source, setSource] = useState(chart.source_note ?? "");
+  const [sourceUrl, setSourceUrl] = useState(chart.source_url ?? "");
   const [spec, setSpec] = useState(chart.spec);
+  const [takeaways, setTakeaways] = useState((chart.takeaways ?? []).join("\n"));
+  const [body, setBody] = useState(chart.body_md ?? "");
+  const [preview, setPreview] = useState(false);
+  const [saving, setSaving] = useState(false);
   const numeric = columns.filter((c) => c.type === "number");
 
+  function insertSummary() {
+    const { takeaways: t, paragraph } = summarize(computeData(rows, spec), spec);
+    if (!takeaways.trim()) setTakeaways(t.join("\n"));
+    if (paragraph) setBody((b) => (b.trim() ? `${b.trim()}\n\n${paragraph}` : paragraph));
+  }
+
+  async function save() {
+    setSaving(true);
+    await onSave({
+      title, subtitle: subtitle || null, source_note: source || null, source_url: sourceUrl || null, spec,
+      takeaways: takeaways.split("\n").map((t) => t.replace(/^[-*]\s*/, "").trim()).filter(Boolean),
+      body_md: body.trim() || null,
+    });
+    setSaving(false);
+  }
+
   return (
-    <div className="card-edit">
-      <div><label>Headline</label><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
-      <div><label>Subtitle</label><input className="input" value={subtitle} onChange={(e) => setSubtitle(e.target.value)} /></div>
-      <div><label>Source</label><input className="input" value={source} placeholder="e.g. U.S. Census Bureau, 2025" onChange={(e) => setSource(e.target.value)} /></div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div>
-          <label>Chart type</label>
-          <select className="input" value={spec.chart_type} onChange={(e) => setSpec({ ...spec, chart_type: e.target.value as any })}>
-            {CHART_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
-          </select>
-        </div>
-        <div>
-          <label>Group by</label>
-          <select className="input" value={spec.x} onChange={(e) => setSpec({ ...spec, x: e.target.value })}>
-            {columns.map((c) => <option key={c.name}>{c.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label>Value</label>
-          <select className="input" value={spec.agg === "count" ? "__count" : spec.y}
-            onChange={(e) => e.target.value === "__count"
-              ? setSpec({ ...spec, agg: "count", y: undefined })
-              : setSpec({ ...spec, y: e.target.value, agg: spec.agg === "count" ? "sum" : spec.agg })}>
-            <option value="__count">Count of rows</option>
-            {numeric.map((c) => <option key={c.name}>{c.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label>Combine values by</label>
-          <select className="input" value={spec.agg} disabled={spec.agg === "count"}
-            onChange={(e) => setSpec({ ...spec, agg: e.target.value as any })}>
-            <option value="sum">Total</option>
-            <option value="avg">Average</option>
-            {spec.agg === "count" && <option value="count">Count</option>}
-          </select>
-        </div>
-        <div>
-          <label>Callout</label>
-          <select className="input" value={spec.highlight} onChange={(e) => setSpec({ ...spec, highlight: e.target.value as any })}>
-            <option value="max">Highest value</option>
-            <option value="min">Lowest value</option>
-            <option value="last">Latest value</option>
-            <option value="none">No callout</option>
-          </select>
-        </div>
-        <div>
-          <label>Show top</label>
-          <input className="input" type="number" min={3} max={25} value={spec.limit ?? ""}
-            placeholder="Auto" onChange={(e) => setSpec({ ...spec, limit: e.target.value ? Number(e.target.value) : undefined })} />
-        </div>
+    <div className="editor">
+      <div className="editor-preview">
+        <Chart id={domId} spec={spec} rows={rows} title={title || "Untitled chart"} subtitle={subtitle} sourceNote={source} />
+        <p className="muted" style={{ fontSize: "0.85rem", padding: "0 16px" }}>Preview updates as you edit. Changes save when you select Save changes.</p>
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="btn primary" onClick={() => onSave({ title, subtitle: subtitle || null, source_note: source || null, spec })}>Save changes</button>
-        <button className="btn quiet" onClick={onCancel}>Cancel</button>
+
+      <div className="editor-fields">
+        <fieldset>
+          <legend>Chart</legend>
+          <div><label htmlFor={`t-${chart.id}`}>Headline</label><input id={`t-${chart.id}`} className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
+          <div><label htmlFor={`s-${chart.id}`}>Subtitle</label><input id={`s-${chart.id}`} className="input" value={subtitle} onChange={(e) => setSubtitle(e.target.value)} /></div>
+          <div className="two">
+            <div>
+              <label>Chart type</label>
+              <select className="input" value={spec.chart_type} onChange={(e) => setSpec({ ...spec, chart_type: e.target.value as any })}>
+                {CHART_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Group by</label>
+              <select className="input" value={spec.x} onChange={(e) => setSpec({ ...spec, x: e.target.value })}>
+                {columns.map((c) => <option key={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Value</label>
+              <select className="input" value={spec.agg === "count" ? "__count" : spec.y}
+                onChange={(e) => e.target.value === "__count"
+                  ? setSpec({ ...spec, agg: "count", y: undefined })
+                  : setSpec({ ...spec, y: e.target.value, agg: spec.agg === "count" ? "sum" : spec.agg })}>
+                <option value="__count">Count of rows</option>
+                {numeric.map((c) => <option key={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Combine values by</label>
+              <select className="input" value={spec.agg} disabled={spec.agg === "count"}
+                onChange={(e) => setSpec({ ...spec, agg: e.target.value as any })}>
+                <option value="sum">Total</option>
+                <option value="avg">Average</option>
+                {spec.agg === "count" && <option value="count">Count</option>}
+              </select>
+            </div>
+            <div>
+              <label>Callout</label>
+              <select className="input" value={spec.highlight} onChange={(e) => setSpec({ ...spec, highlight: e.target.value as any })}>
+                <option value="max">Highest value</option>
+                <option value="min">Lowest value</option>
+                <option value="last">Latest value</option>
+                <option value="none">No callout</option>
+              </select>
+            </div>
+            <div>
+              <label>Show top</label>
+              <input className="input" type="number" min={3} max={25} value={spec.limit ?? ""}
+                placeholder="Auto" onChange={(e) => setSpec({ ...spec, limit: e.target.value ? Number(e.target.value) : undefined })} />
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Article</legend>
+          <p className="muted" style={{ margin: 0, fontSize: "0.9rem" }}>
+            Shown under the chart on its public page. Start from the data summary, then add the context: why it matters, what&apos;s behind the numbers.
+          </p>
+          <div>
+            <button type="button" className="btn quiet" onClick={insertSummary}>Insert data summary</button>
+          </div>
+          <div>
+            <label htmlFor={`k-${chart.id}`}>Key takeaways</label>
+            <textarea id={`k-${chart.id}`} className="input" rows={4} value={takeaways}
+              placeholder="One takeaway per line" onChange={(e) => setTakeaways(e.target.value)} />
+          </div>
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <label htmlFor={`b-${chart.id}`}>Article</label>
+              <div className="tabs" style={{ margin: 0 }}>
+                <button type="button" className="tab" aria-pressed={!preview} onClick={() => setPreview(false)}>Write</button>
+                <button type="button" className="tab" aria-pressed={preview} onClick={() => setPreview(true)}>Preview</button>
+              </div>
+            </div>
+            {preview ? (
+              <div className="article prose-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) || "<p class='muted'>Nothing written yet.</p>" }} />
+            ) : (
+              <textarea id={`b-${chart.id}`} className="input" rows={14} value={body} onChange={(e) => setBody(e.target.value)}
+                placeholder={"Write the story behind the chart.\n\n## Use two hashes for a section heading\n\n**bold**, *italic*, [link text](https://example.com)\n- bullet points"} />
+            )}
+          </div>
+          <div className="two">
+            <div><label htmlFor={`sn-${chart.id}`}>Source name</label><input id={`sn-${chart.id}`} className="input" value={source} placeholder="e.g. U.S. Census Bureau, 2025" onChange={(e) => setSource(e.target.value)} /></div>
+            <div><label htmlFor={`su-${chart.id}`}>Source link</label><input id={`su-${chart.id}`} className="input" type="url" value={sourceUrl} placeholder="https://" onChange={(e) => setSourceUrl(e.target.value)} /></div>
+          </div>
+        </fieldset>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+          <button className="btn quiet" onClick={onCancel} disabled={saving}>Cancel</button>
+        </div>
       </div>
     </div>
   );

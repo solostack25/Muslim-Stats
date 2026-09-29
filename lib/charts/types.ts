@@ -37,6 +37,9 @@ export interface ChartRecord {
   source_note: string | null;
   slug: string | null;
   published_at: string | null;
+  body_md: string | null;
+  takeaways: string[];
+  source_url: string | null;
 }
 
 export type Row = Record<string, unknown>;
