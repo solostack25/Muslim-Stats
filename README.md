@@ -7,7 +7,7 @@ Next.js 15 (App Router) · Supabase (project `txbyt`, ref `pzdrvpszytvjsfchhoti`
 ## How it works
 
 1. **Upload** (`/dashboard`): Excel/CSV is parsed in the browser (SheetJS). Column types are auto-detected and can be corrected before saving. Up to 5,000 rows are stored.
-2. **Suggest** (`/api/suggest`): Claude sees only a summary of the columns plus a dozen sample rows, and returns chart *specs* (type, columns, aggregation, headline). Specs are validated against the real columns before saving as drafts.
+2. **Suggest** (`/api/suggest`): by default, rules in `lib/charts/rules.ts` turn column types into chart ideas (ranked bars by category, trends over time, share-of-total donuts, and so on). Free, instant, and nothing leaves the app. If `ANTHROPIC_API_KEY` is set, Claude writes the suggestions instead (it sees only a column summary plus a dozen sample rows) and rules fill any gap. Ideas already created for a dataset are never suggested twice.
 3. **Review** (`/dashboard/datasets/[id]`): approve, reject, edit, or download PNG/SVG.
 4. **Publish**: approved charts get a slug and a frozen snapshot of their computed values (`published_data`), so public pages never read raw datasets.
 5. **Public site**: `/` (feed), `/c/[slug]` (chart page with embed code), `/embed/[slug]` (iframe-able).
@@ -18,7 +18,7 @@ All numbers on a chart are computed in `lib/charts/compute.ts`, never by the AI.
 
 1. `cp .env.example .env.local` and fill in:
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase dashboard, Project Settings, API keys (publishable/anon key)
-   - `ANTHROPIC_API_KEY` — console.anthropic.com
+   - `ANTHROPIC_API_KEY` — optional; enables AI-written suggestions (console.anthropic.com)
    - `NEXT_PUBLIC_SITE_URL` — production URL once deployed
 2. `npm install && npm run dev`
 3. In Supabase, Authentication, URL Configuration: set Site URL to the production URL and add

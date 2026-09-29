@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStaff } from "@/lib/supabase/server";
-import { CHART_TYPES, type ChartSpec, type ColumnProfile } from "@/lib/charts/types";
+import { CHART_TYPES, type ChartSpec, type ColumnProfile, type Row } from "@/lib/charts/types";
+import { hasValues, signature, suggestByRules } from "@/lib/charts/rules";
 
 export const maxDuration = 60;
 
@@ -71,6 +72,65 @@ export async function POST(req: Request) {
   if (error || !ds) return NextResponse.json({ error: "Dataset not found." }, { status: 404 });
 
   const columns = ds.columns as ColumnProfile[];
+  const rows = ds.rows as Row[];
+  const wanted = Math.min(Math.max(Number(count) || 6, 2), 12);
+
+  // Skip ideas that already exist for this dataset (any status)
+  const { data: existing } = await supabase.from("charts").select("spec").eq("dataset_id", ds.id);
+  const taken = new Set((existing ?? []).map((c: { spec: ChartSpec }) => signature(c.spec)));
+
+  let valid: (ChartSpec & { title: string; subtitle?: string })[] = [];
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    const ai = await suggestWithAI(ds, columns, wanted);
+    if ("error" in ai) return NextResponse.json({ error: ai.error }, { status: 502 });
+    valid = ai.proposals.map((p) => validate(p, columns)).filter(Boolean) as typeof valid;
+  }
+
+  // Rules: the default when there is no API key, and a top-up if AI returns too few
+  if (valid.length < wanted) {
+    const fromRules = suggestByRules(columns, rows).filter((s) => hasValues(rows, s.y));
+    const have = new Set([...taken, ...valid.map(signature)]);
+    for (const s of fromRules) {
+      if (valid.length >= wanted) break;
+      if (!have.has(signature(s))) {
+        valid.push(s);
+        have.add(signature(s));
+      }
+    }
+  }
+
+  valid = valid.filter((v) => !taken.has(signature(v)));
+  if (!valid.length) {
+    return NextResponse.json(
+      { error: "There are no new chart ideas for this dataset. Edit an existing chart to try other columns." },
+      { status: 422 }
+    );
+  }
+  const inserts = valid.map((v) => {
+    const { title, subtitle, ...spec } = v;
+    return {
+      dataset_id: ds.id,
+      owner_id: user.id,
+      status: "draft",
+      chart_type: spec.chart_type,
+      spec,
+      title,
+      subtitle: subtitle ?? null,
+    };
+  });
+
+  const { error: insErr } = await supabase.from("charts").insert(inserts);
+  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+
+  return NextResponse.json({ created: inserts.length });
+}
+
+async function suggestWithAI(
+  ds: { name: string; rows: unknown; row_count: number },
+  columns: ColumnProfile[],
+  count: number
+): Promise<{ proposals: unknown[] } | { error: string }> {
   const summary = {
     dataset: ds.name,
     row_count: ds.row_count,
@@ -94,7 +154,7 @@ export async function POST(req: Request) {
       messages: [
         {
           role: "user",
-          content: `Propose ${Math.min(Math.max(Number(count) || 6, 2), 10)} charts for this dataset:\n${JSON.stringify(summary)}`,
+          content: `Propose ${count} charts for this dataset:\n${JSON.stringify(summary)}`,
         },
       ],
     }),
@@ -102,7 +162,7 @@ export async function POST(req: Request) {
 
   if (!res.ok) {
     const detail = await res.text();
-    return NextResponse.json({ error: `Chart suggestions failed: ${detail.slice(0, 300)}` }, { status: 502 });
+    return { error: `Chart suggestions failed: ${detail.slice(0, 300)}` };
   }
 
   const json = await res.json();
@@ -119,27 +179,8 @@ export async function POST(req: Request) {
     const end = text.lastIndexOf("]");
     proposals = JSON.parse(text.slice(start, end + 1));
   } catch {
-    return NextResponse.json({ error: "The suggestions came back in an unexpected format. Try again." }, { status: 502 });
+    return { error: "The suggestions came back in an unexpected format. Try again." };
   }
 
-  const valid = proposals.map((p) => validate(p, columns)).filter(Boolean) as ReturnType<typeof validate>[];
-  if (!valid.length) return NextResponse.json({ error: "No usable charts were suggested. Check your column types and try again." }, { status: 422 });
-
-  const inserts = valid.map((v) => {
-    const { title, subtitle, ...spec } = v!;
-    return {
-      dataset_id: ds.id,
-      owner_id: user.id,
-      status: "draft",
-      chart_type: spec.chart_type,
-      spec,
-      title,
-      subtitle: subtitle ?? null,
-    };
-  });
-
-  const { error: insErr } = await supabase.from("charts").insert(inserts);
-  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
-
-  return NextResponse.json({ created: inserts.length });
+  return { proposals };
 }

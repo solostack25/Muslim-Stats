@@ -68,11 +68,11 @@ export default function Uploader() {
     const json = await res.json();
     if (!res.ok) { setStatus(null); return setErr(json.error); }
 
-    setStatus("Suggesting charts… this takes about 20 seconds.");
+    setStatus("Suggesting charts…");
     const sug = await fetch("/api/suggest", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ datasetId: json.id, count: 6 }),
+      body: JSON.stringify({ datasetId: json.id, count: 8 }),
     });
     if (!sug.ok) {
       const s = await sug.json().catch(() => ({}));
