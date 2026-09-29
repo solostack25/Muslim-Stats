@@ -18,7 +18,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const c = await getPublishedChart(slug);
   if (!c) return {};
   const description = (c.takeaways?.[0] as string | undefined) ?? c.subtitle ?? (c.body_md ? plain(c.body_md).slice(0, 160) : undefined);
-  return { title: c.title, description, openGraph: { title: c.title, description } };
+  return {
+    title: c.title,
+    description,
+    openGraph: { title: c.title, description },
+    // Sample content uses fictional data: keep it out of search results
+    robots: c.is_sample ? { index: false, follow: false } : undefined,
+  };
 }
 
 function DataTable({ data, spec }: { data: Datum[]; spec: ChartSpec }) {
@@ -70,6 +76,11 @@ export default async function ChartPage({ params }: { params: Promise<{ slug: st
     <>
       <Masthead />
       <main className="chart-page">
+        {c.is_sample && (
+          <p className="sample-banner" role="note">
+            Sample content: the data in this chart and article is fictional and shown for demonstration only.
+          </p>
+        )}
         <div className="frame">
           <Chart spec={c.spec} data={data} title={c.title} subtitle={c.subtitle} sourceNote={c.source_note} />
         </div>

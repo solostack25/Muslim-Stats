@@ -10,7 +10,7 @@ export function publicClient() {
 export async function getPublishedChart(slug: string) {
   const { data } = await publicClient()
     .from("charts")
-    .select("id, title, subtitle, source_note, source_url, spec, slug, published_at, published_data, body_md, takeaways")
+    .select("id, title, subtitle, source_note, source_url, spec, slug, published_at, published_data, body_md, takeaways, is_sample")
     .eq("slug", slug)
     .eq("status", "published")
     .single();

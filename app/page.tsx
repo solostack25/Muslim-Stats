@@ -8,7 +8,7 @@ export const revalidate = 60;
 export default async function Home() {
   const { data: charts } = await publicClient()
     .from("charts")
-    .select("id, title, subtitle, source_note, spec, slug, published_at, published_data")
+    .select("id, title, subtitle, source_note, spec, slug, published_at, published_data, is_sample")
     .eq("status", "published")
     .order("published_at", { ascending: false })
     .limit(60);
@@ -29,6 +29,7 @@ export default async function Home() {
               <Link key={c.id} href={`/c/${c.slug}`}>
                 <figure>
                   <Chart spec={c.spec} data={c.published_data ?? []} title={c.title} subtitle={c.subtitle} sourceNote={c.source_note} />
+                  {c.is_sample && <figcaption className="sample-tag">Sample data</figcaption>}
                 </figure>
               </Link>
             ))}

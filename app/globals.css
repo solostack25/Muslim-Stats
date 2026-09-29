@@ -148,3 +148,8 @@ th select { margin-top: 4px; font-size: 0.8rem; padding: 3px 6px; }
 .source { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); }
 .source h2 { font-size: 1.15rem; margin-bottom: 6px; }
 .source p { margin: 0; }
+
+/* Sample content labels */
+.sample-banner { background: #FFF6DF; border: 1px solid #F0D48A; color: var(--ink); padding: 10px 16px; border-radius: 6px; margin: 0 0 20px; font-weight: 500; }
+.sample-tag { display: inline-block; font-size: 0.78rem; font-weight: 600; color: #8A6300; background: #FFF6DF; padding: 3px 10px; margin: 0 16px 14px; border-radius: 999px; }
+.sample-tag.inline { margin: 0 0 0 10px; vertical-align: middle; }

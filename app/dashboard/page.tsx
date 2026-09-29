@@ -24,7 +24,7 @@ export default async function Dashboard() {
 
   const { data: datasets } = await supabase
     .from("datasets")
-    .select("id, name, row_count, created_at, charts(count)")
+    .select("id, name, row_count, created_at, is_sample, charts(count)")
     .order("created_at", { ascending: false });
 
   return (
@@ -48,7 +48,10 @@ export default async function Dashboard() {
             <ul className="list">
               {datasets.map((d: any) => (
                 <li key={d.id}>
-                  <Link href={`/dashboard/datasets/${d.id}`}>{d.name}</Link>
+                  <span>
+                    <Link href={`/dashboard/datasets/${d.id}`}>{d.name}</Link>
+                    {d.is_sample && <span className="sample-tag inline">Sample</span>}
+                  </span>
                   <span className="muted">
                     {d.row_count.toLocaleString()} rows, {d.charts?.[0]?.count ?? 0} charts
                   </span>
